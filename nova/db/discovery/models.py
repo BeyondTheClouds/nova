@@ -801,6 +801,10 @@ class Migration(BASE, NovaBase, models.SoftDeleteMixin):
 
 
 @global_scope
+@secondary_index_decorator("vlan")
+@secondary_index_decorator("host")
+@secondary_index_decorator("project_id")
+@secondary_index_decorator("deleted")
 class Network(BASE, NovaBase, models.SoftDeleteMixin):
     """Represents a network."""
     __tablename__ = 'networks'
@@ -873,6 +877,11 @@ class VirtualInterface(BASE, NovaBase, models.SoftDeleteMixin):
 
 # TODO(vish): can these both come from the same baseclass?
 @global_scope
+@secondary_index_decorator("address")
+@secondary_index_decorator("allocated")
+@secondary_index_decorator("host")
+@secondary_index_decorator("network_id")
+@secondary_index_decorator("deleted")
 class FixedIp(BASE, NovaBase, models.SoftDeleteMixin):
     """Represents a fixed IP for an instance."""
     __tablename__ = 'fixed_ips'
@@ -932,6 +941,11 @@ class FixedIp(BASE, NovaBase, models.SoftDeleteMixin):
 
 
 @global_scope
+@secondary_index_decorator("address")
+@secondary_index_decorator("fixed_ip_id")
+@secondary_index_decorator("host")
+@secondary_index_decorator("project_id")
+@secondary_index_decorator("deleted")
 class FloatingIp(BASE, NovaBase, models.SoftDeleteMixin):
     """Represents a floating IP that dynamically forwards to a fixed IP."""
     __tablename__ = 'floating_ips'

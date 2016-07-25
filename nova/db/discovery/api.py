@@ -69,6 +69,7 @@ from nova.objects import fields
 from nova import quota
 from nova import safe_utils
 
+
 from nova.db.discovery.context import RomeContextManager
 from nova.db.discovery.context import RomeRequestContext
 
@@ -5914,7 +5915,6 @@ def aggregate_create(context, values, metadata=None):
         # read from db
         #context.session.expire(aggregate, ['_metadata'])
         aggregate._metadata
-
 
 
     return aggregate

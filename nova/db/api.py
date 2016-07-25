@@ -17,23 +17,41 @@
 
 """Defines interface for DB access.
 
-Functions in this module are imported into the nova.db namespace. Call these
-functions from nova.db namespace, not the nova.db.api namespace.
+Discovery modifies the original `nova.db.api.py' in order to choose
+between MySQL backend and REDIS backend. The operator should specify
+the backend in the `nova.conf' file.
 
-All functions in this module return objects that implement a dictionary-like
-interface. Currently, many of these objects are sqlalchemy objects that
-implement a dictionary interface. However, a future goal is to have all of
-these objects be simple dictionaries.
+```
+[discovery]
+db_backend = (redis | mysql)
+gen_logs = (True | False)
+```
+
+- `db_backend' targets the database backend. 
+- `gen_logs' records the execution time of db methods.
+
+-----
+
+Functions in this module are imported into the nova.db namespace. Call
+these functions from nova.db namespace, not the nova.db.api namespace.
+
+All functions in this module return objects that implement a
+dictionary-like interface. Currently, many of these objects are
+sqlalchemy objects that implement a dictionary interface. However, a
+future goal is to have all of these objects be simple dictionaries.
 
 """
 
 from oslo_config import cfg
-from oslo_db import concurrency
 from oslo_log import log as logging
 
 from nova.cells import rpcapi as cells_rpcapi
 from nova.i18n import _LE
+import json
+import time
+import inspect
 
+get_time_ms = lambda: int(round(time.time() * 1000))
 
 db_opts = [
     cfg.BoolOpt('enable_new_services',
@@ -44,17 +62,91 @@ db_opts = [
                help='Template string to be used to generate instance names'),
     cfg.StrOpt('snapshot_name_template',
                default='snapshot-%s',
-               help='Template string to be used to generate snapshot names'),
+               help='Template string to be used to generate snapshot names')]
+
+# Discovery parameters in the nova.conf file
+discovery_opts = [
+    cfg.StrOpt('db_backend',
+               default='redis',
+               help='Database backend'),
+    cfg.BoolOpt('gen_logs',
+               default=False,
+               help='Generates logs')
 ]
 
 CONF = cfg.CONF
 CONF.register_opts(db_opts)
+CONF.register_opts(discovery_opts, group='discovery')
 
-_BACKEND_MAPPING = {'sqlalchemy': 'nova.db.discovery.api'}
-#_BACKEND_MAPPING = {'sqlalchemy': 'nova.db.sqlalchemy.api'}
+class ApiProxy:
+    """Class that enables the comparison between MySQL and Discovery
+    implementations. It logs the execution time of db methods.
+
+    """
+    def __init__(self):
+       self.backend = None
+       self.label = ''
+       
+    def _init_backend(self):
+        # Proxy that targets the correct backend
+        if CONF.discovery.db_backend.upper() == 'REDIS':
+            from nova.db.discovery import api as discovery_api
+            self.backend = discovery_api
+            self.label = "[Discovery_impl]"
+        else:
+            from nova.db.sqlalchemy import api as mysql_api
+            self.backend = mysql_api
+            self.label = "[MySQL_impl]"
 
 
-IMPL = concurrency.TpoolDbapiWrapper(CONF, backend_mapping=_BACKEND_MAPPING)
+    def __getattr__(self, attr):
+        if attr in ["backend", "label"]:
+           return self.__dict__[attr]
+        self._init_backend()
+        ret = object.__getattribute__(self.backend, attr)
+        if hasattr(ret, "__call__") and CONF.discovery.gen_logs:
+            return self.FunctionWrapper(ret, attr, self.label)
+        return ret
+
+    class FunctionWrapper:
+        """Class used to measure the execution time of a method and log it
+        inside `opt.logs.db_api_<backend>.log'.
+
+        """
+        def __init__(self, callable, call_name, label):
+           self.callable = callable
+           self.call_name = call_name
+           self.label = label
+
+        def __call__(self, *args, **kwargs):
+            time_before = get_time_ms()
+            result_callable = self.callable(*args, **kwargs)
+            time_after = get_time_ms()
+            duration = time_after - time_before
+            frm = inspect.stack()[1]
+            mod = inspect.getmodule(frm[0])
+
+            dct = {
+                'backend': self.label,
+                'class': mod.__name__,
+                'method': self.call_name,
+                'args': str(args),
+                'kwargs': str(kwargs),
+                'result': str(result_callable),
+                'timestamp': get_time_ms(),
+                'duration': duration
+            }
+            ppjson = json.dumps(dct)
+            print(ppjson)
+            if self.label == "[MySQL_impl]":
+                with open("/opt/logs/db_api_mysql.log", "a") as f:
+                    f.write(ppjson+"\n")
+            else:
+                with open("/opt/logs/db_api_disco.log", "a") as f:
+                    f.write(ppjson+"\n")
+            return result_callable
+
+IMPL = ApiProxy()
 
 LOG = logging.getLogger(__name__)
 

@@ -57,8 +57,8 @@ from nova.compute import vm_states
 #from nova import context
 from nova.db.discovery import context
 from nova import db
-from nova.db.sqlalchemy import api as sqlalchemy_api
-from nova.db.sqlalchemy import models
+from nova.db.discovery import api as discovery_api
+from nova.db.discovery import models
 from nova.db.sqlalchemy import types as col_types
 from nova.db.sqlalchemy import utils as db_utils
 from nova import exception
@@ -409,9 +409,9 @@ class AggregateDBApiTestCase(DiscoveryTestCase):
             return get_query
 
         get_query = counted()
-        self.stubs.Set(sqlalchemy_api,
+        self.stubs.Set(discovery_api,
                        '_aggregate_metadata_get_query', get_query)
-        self.assertRaises(db_exc.DBDuplicateEntry, sqlalchemy_api.
+        self.assertRaises(db_exc.DBDuplicateEntry, discovery_api.
                           aggregate_metadata_add, ctxt, result['id'], {},
                           max_retries=5)
         self.assertEqual(get_query.counter, 5)
@@ -1694,36 +1694,36 @@ class InstanceTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
 
     def test_check_instance_exists(self):
         instance = self.create_instance_with_args()
-        #with sqlalchemy_api.main_context_manager.reader.using(self.ctxt):
-        self.assertIsNone(sqlalchemy_api._check_instance_exists_in_project(
+        #with discovery_api.main_context_manager.reader.using(self.ctxt):
+        self.assertIsNone(discovery_api._check_instance_exists_in_project(
             self.ctxt, instance['uuid']))
 
     def test_check_instance_exists_non_existing_instance(self):
-        #with sqlalchemy_api.main_context_manager.reader.using(self.ctxt):
+        #with discovery_api.main_context_manager.reader.using(self.ctxt):
         self.assertRaises(exception.InstanceNotFound,
-                          sqlalchemy_api._check_instance_exists_in_project,
+                          discovery_api._check_instance_exists_in_project,
                           self.ctxt, '123')
 
     def test_check_instance_exists_from_different_tenant(self):
         context1 = context.RomeRequestContext('user1', 'project1')
         context2 = context.RomeRequestContext('user2', 'project2')
         instance = self.create_instance_with_args(context=context1)
-        #with sqlalchemy_api.main_context_manager.reader.using(context1):
-        self.assertIsNone(sqlalchemy_api._check_instance_exists_in_project(
+        #with discovery_api.main_context_manager.reader.using(context1):
+        self.assertIsNone(discovery_api._check_instance_exists_in_project(
         context1, instance['uuid']))
 
-        #with sqlalchemy_api.main_context_manager.reader.using(context2):
+        #with discovery_api.main_context_manager.reader.using(context2):
         self.assertRaises(exception.InstanceNotFound,
-                          sqlalchemy_api._check_instance_exists_in_project,
+                          discovery_api._check_instance_exists_in_project,
                           context2, instance['uuid'])
 
     def test_check_instance_exists_admin_context(self):
         some_context = context.RomeRequestContext('some_user', 'some_project')
         instance = self.create_instance_with_args(context=some_context)
 
-        #with sqlalchemy_api.main_context_manager.reader.using(self.ctxt):
+        #with discovery_api.main_context_manager.reader.using(self.ctxt):
         # Check that method works correctly with admin context
-        self.assertIsNone(sqlalchemy_api._check_instance_exists_in_project(
+        self.assertIsNone(discovery_api._check_instance_exists_in_project(
             self.ctxt, instance['uuid']))
 
 
@@ -2345,7 +2345,7 @@ class SecurityGroupTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
                                    self.ctxt.user_id)
         self.assertEqual(2, usage.until_refresh)
 
-    @mock.patch.object(db.sqlalchemy.api, '_security_group_get_by_names')
+    @mock.patch.object(discovery_api, '_security_group_get_by_names')
     def test_security_group_ensure_default_called_concurrently(self, sg_mock):
         # make sure NotFound is always raised here to trick Nova to insert the
         # duplicate security group entry
@@ -2453,7 +2453,7 @@ class InstanceTypeTestCase(BaseInstanceTypeTestCase):
                                  ignored_keys)
         self._assertEqualObjects(extra_specs, flavor['extra_specs'])
 
-    @mock.patch('sqlalchemy.orm.query.Query.all', return_value=[])
+    @mock.patch('lib.rome.core.orm.query.Query.all', return_value=[])
     def test_flavor_create_with_extra_specs_duplicate(self, mock_all):
         extra_specs = dict(key='value')
         flavorid = 'flavorid'
@@ -2851,7 +2851,7 @@ class NetworkTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
             else:
                 return 1
 
-        with mock.patch('sqlalchemy.orm.query.Query.update',
+        with mock.patch('lib.rome.core.orm.query.Query.update',
                         side_effect=fake_update) as mock_update:
             db.network_set_host(self.ctxt, network.id, 'example.com')
             self.assertEqual(2, mock_update.call_count)
@@ -2866,7 +2866,7 @@ class NetworkTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
             else:
                 return 1
 
-        with mock.patch('sqlalchemy.orm.query.Query.update',
+        with mock.patch('lib.rome.core.orm.query.Query.update',
                         side_effect=fake_update) as mock_update:
             db.network_set_host(self.ctxt, network.id, 'example.com')
             self.assertEqual(2, mock_update.call_count)
@@ -2875,7 +2875,7 @@ class NetworkTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
         values = {'project_id': 'project1'}
         network = db.network_create_safe(self.ctxt, values)
 
-        with mock.patch('sqlalchemy.orm.query.Query.update',
+        with mock.patch('lib.rome.core.orm.query.Query.update',
                         return_value=0) as mock_update:
             self.assertRaises(exception.NetworkSetHostFailed,
                               db.network_set_host, self.ctxt, network.id,
@@ -3487,13 +3487,13 @@ class ComputeNodeTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
                           db.compute_node_get_model, self.ctxt,
                           item_old['id'])
 
-    @mock.patch("nova.db.sqlalchemy.api.compute_node_get_model")
+    @mock.patch("nova.db.discovery.api.compute_node_get_model")
     def test_dbapi_compute_node_get_model(self, mock_get_model):
         cid = self.item["id"]
         db.api.compute_node_get_model(self.ctxt, cid)
         mock_get_model.assert_called_once_with(self.ctxt, cid)
 
-    @mock.patch("nova.db.sqlalchemy.api.model_query")
+    @mock.patch("nova.db.discovery.api.model_query")
     def test_compute_node_get_model(self, mock_model_query):
 
         class FakeFiltered(object):
@@ -3507,7 +3507,7 @@ class ComputeNodeTestCase(DiscoveryTestCase, ModelsObjectComparatorMixin):
                 return fake_filtered_cn
 
         mock_model_query.return_value = FakeModelQuery()
-        result = sqlalchemy_api.compute_node_get_model(self.ctxt,
+        result = discovery_api.compute_node_get_model(self.ctxt,
                                                        self.item["id"])
         self.assertEqual(result, mock.sentinel.first)
         mock_model_query.assert_called_once_with(self.ctxt, models.ComputeNode)
@@ -3541,8 +3541,8 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
                                       updated_at=new))
 
     def mock_db_query_first_to_raise_data_error_exception(self):
-        self.mox.StubOutWithMock(query.Query, 'first')
-        query.Query.first().AndRaise(db_exc.DBError())
+        self.mox.StubOutWithMock(Query, 'first')
+        Query.first().AndRaise(db_exc.DBError())
         self.mox.ReplayAll()
 
     def test_fixed_ip_disassociate_all_by_timeout_single_host(self):
@@ -3774,7 +3774,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
                 return objects.Instance(id=1, address=address, reserved=False,
                                         instance_uuid=None, network_id=None)
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         side_effect=fake_first) as mock_first:
             db.fixed_ip_associate(self.ctxt, address, instance_uuid,
                                   network_id=network['id'])
@@ -3798,7 +3798,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
                 return objects.Instance(id=1, address=address, reserved=False,
                                         instance_uuid=None, network_id=None)
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         side_effect=fake_first) as mock_first:
             db.fixed_ip_associate(self.ctxt, address, instance_uuid,
                                   network_id=network['id'])
@@ -3818,7 +3818,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
             return objects.Instance(id=2, address=address, reserved=False,
                                     instance_uuid=None, network_id=None)
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         side_effect=fake_first) as mock_first:
             self.assertRaises(exception.FixedIpAssociateFailed,
                               db.fixed_ip_associate, self.ctxt, address,
@@ -3829,7 +3829,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
     def test_fixed_ip_associate_ip_not_in_network_with_no_retries(self):
         instance_uuid = self._create_instance()
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         return_value=None) as mock_first:
             self.assertRaises(exception.FixedIpNotFoundForNetwork,
                               db.fixed_ip_associate,
@@ -3843,7 +3843,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
         network = db.network_create_safe(self.ctxt, {})
         address = self.create_fixed_ip(network_id=network['id'])
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         return_value=None) as mock_first:
             self.assertRaises(exception.FixedIpNotFoundForNetwork,
                               db.fixed_ip_associate,
@@ -3962,7 +3962,7 @@ class FixedIPTestCase(BaseInstanceTypeTestCase):
             return {'network_id': network['id'], 'address': 'invalid',
                     'instance_uuid': None, 'host': None, 'id': 1}
 
-        with mock.patch('sqlalchemy.orm.query.Query.first',
+        with mock.patch('lib.rome.core.orm.query.Query.first',
                         side_effect=fake_first) as mock_first:
             self.assertRaises(exception.FixedIpAssociateFailed,
                               db.fixed_ip_associate_pool, self.ctxt,
